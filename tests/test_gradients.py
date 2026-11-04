@@ -48,6 +48,13 @@ def test_compliance_bound(prob):
     fd_check(prob, ComplianceBound([3.0, 2.0], eps=0.1), None, stage=1)
 
 
+@pytest.mark.parametrize("index", [0, 2])
+def test_probe_cap(prob, index):
+    from bdto.loads import probe_loads
+    fd_check(prob, ComplianceBound([3.0, 2.0], eps=0.1, block="probes", index=index),
+             {"probes": probe_loads(prob)}, stage=1)
+
+
 def test_expected_compliance(prob):
     S = direction_second_moment(-np.pi / 2, np.pi / 3)
     fd_check(prob, ExpectedCompliance("robust", S, ref=1.0), {"robust": direction_basis(prob)})

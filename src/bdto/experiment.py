@@ -35,6 +35,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--sigma-behavior", type=float, default=None)
     p.add_argument("--sigma-shape", type=float, default=None)
     p.add_argument("--behavior-mode", default="logcorr", choices=["logcorr", "logdiag"])
+    p.add_argument("--probe-cap", type=float, default=0.10,
+                   help="cap each probe compliance at (1 + cap) x nominal, both sets; negative disables")
     p.add_argument("--robust-range", type=float, default=180.0, help="robust design: load-angle half range (deg)")
     p.add_argument("--n-test", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
@@ -70,7 +72,8 @@ def run(args: argparse.Namespace) -> dict:
     rob = robust(problem, settings, args.robust_range)
     tick("robust")
     common = dict(n_designs=args.n_designs, settings=settings, mode=args.mode, eps=args.eps,
-                  alpha=args.alpha, kernel=args.kernel)
+                  alpha=args.alpha, kernel=args.kernel,
+                  probe_cap=args.probe_cap if args.probe_cap >= 0 else None)
     shape = diverse_set(problem, base, "shape", sigma=args.sigma_shape, **common)
     tick("shape set")
     behavior = diverse_set(problem, base, "behavior", sigma=args.sigma_behavior,

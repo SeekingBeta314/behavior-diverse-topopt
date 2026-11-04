@@ -38,6 +38,7 @@ class Result:
     compliance: float
     objective: float
     stage_compliance: list[float]
+    stage_xphys: list[np.ndarray] = field(default_factory=list)  # densities at each stage end
     history: list[dict] = field(default_factory=list)
 
     @property
@@ -139,7 +140,7 @@ def optimize(problem: Problem, objective, constraints: Sequence = (),
     active = pipe.active
     mma = MMA(int(active.sum()), 1 + len(constraints), move=s.move)
 
-    it_stage, history, stage_c = 0, [], []
+    it_stage, history, stage_c, stage_x = 0, [], [], []
     for it in range(1, len(pipe.betas) * s.stage_iters + 1):
         xt, resp, st = pipe.evaluate(x)
         f0, df0 = pipe.term_gradient(objective, xt, resp, st)
@@ -165,6 +166,7 @@ def optimize(problem: Problem, objective, constraints: Sequence = (),
 
         if (it_stage >= s.min_stage_iters and change < s.tol) or it_stage >= s.stage_iters:
             stage_c.append(st.compliance)
+            stage_x.append(st.xphys)
             if pipe.stage == len(pipe.betas) - 1:
                 break
             pipe.set_stage(pipe.stage + 1)
@@ -172,6 +174,7 @@ def optimize(problem: Problem, objective, constraints: Sequence = (),
             mma.reset()
 
     _, _, st = pipe.evaluate(x)
-    stage_c[-1] = st.compliance
+    stage_c[-1], stage_x[-1] = st.compliance, st.xphys
     return Result(label=label, x=x.copy(), xphys=st.xphys, compliance=st.compliance,
-                  objective=float(objective(st)[0]), stage_compliance=stage_c, history=history)
+                  objective=float(objective(st)[0]), stage_compliance=stage_c,
+                  stage_xphys=stage_x, history=history)

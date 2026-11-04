@@ -86,15 +86,19 @@ class ExpectedCompliance:
 
 
 class ComplianceBound:
-    """Near-optimality constraint  c / c_ref - (1 + eps) <= 0."""
+    """Constraint  c / c_ref - (1 + eps) <= 0  on the compliance of load ``index`` in
+    ``block``: near-optimality on the primary load, or a cap on one probe."""
 
-    def __init__(self, ref, eps: float, block: str = "primary"):
-        self.block, self.ref, self.eps = block, _Ref(ref), eps
+    def __init__(self, ref, eps: float, block: str = "primary", index: int = 0):
+        self.block, self.ref, self.eps, self.index = block, _Ref(ref), eps, index
 
     def __call__(self, st: State):
-        c = st.block(self.block)[0, 0]
-        r = self.ref(st.stage, c)
-        return c / r - (1 + self.eps), st.embed(self.block, np.array([[1.0 / r]])), None
+        i = self.index
+        F = st.block(self.block)
+        r = self.ref(st.stage, F[i, i])
+        Wb = np.zeros_like(F)
+        Wb[i, i] = 1.0 / r
+        return F[i, i] / r - (1 + self.eps), st.embed(self.block, Wb), None
 
 
 class Sum:

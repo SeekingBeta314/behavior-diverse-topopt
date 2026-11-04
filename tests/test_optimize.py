@@ -50,6 +50,19 @@ def test_diverse_set_respects_budget(prob, base, kind):
     assert np.sqrt(np.mean((new.xphys - base.xphys) ** 2)) > 0.05  # actually different
 
 
+def test_probe_caps_hold(prob, base):
+    from bdto.loads import probe_loads
+    from bdto.optimize import evaluate_state
+
+    cap = 0.15
+    new = diverse_set(prob, base, "behavior", n_designs=2, settings=FAST, eps=0.15, probe_cap=cap)[1]
+    blocks = {"probes": probe_loads(prob)}
+    ratio = (np.diag(evaluate_state(prob, new.xphys, blocks).block("probes"))
+             / np.diag(evaluate_state(prob, base.xphys, blocks).block("probes")))
+    assert np.all(ratio <= (1 + cap) * 1.03), ratio
+    assert len(base.stage_xphys) == len(FAST.betas)
+
+
 def test_evaluation_pipeline(prob, base):
     rob = robust(prob, FAST)
     loads, fam = heldout_loads(prob, 10)
