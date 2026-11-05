@@ -76,6 +76,18 @@ def test_budget_robust_obeys_set_rules(prob, base):
     assert np.all(ratio <= (1 + cap) * 1.03), ratio
 
 
+def test_robust_set_and_prefixes(prob, base):
+    from bdto.designs import robust_set
+    from bdto.evaluate import prefix_geomeans
+
+    rs = robust_set(prob, base, n_designs=3, settings=FAST, eps=0.1, probe_cap=0.1)
+    assert [r.label for r in rs] == ["nominal", "robust_set-1", "robust_set-2"]
+    assert all(r.compliance <= 1.1 * base.compliance * 1.03 for r in rs)
+    C = np.array([[2.0, 1.0], [1.0, 2.0], [0.5, 3.0]])
+    np.testing.assert_allclose(prefix_geomeans(C, np.array([2.0, 1.0])),
+                               [1.0, np.sqrt(0.5), np.sqrt(0.25)])
+
+
 def test_evaluation_pipeline(prob, base):
     rob = robust(prob, FAST)
     loads, fam = heldout_loads(prob, 10)

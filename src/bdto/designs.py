@@ -32,16 +32,17 @@ def nominal(problem: Problem, settings: Settings | None = None) -> Result:
 
 def robust(problem: Problem, settings: Settings | None = None, half_range_deg: float = 180.0,
            base: Result | None = None, eps: float | None = None, probe_cap: float | None = None,
-           label: str = "robust") -> Result:
+           label: str = "robust", center_deg: float | None = None) -> Result:
     """Minimize expected compliance with the load direction uniform over
-    +-``half_range_deg`` around the primary direction.
+    +-``half_range_deg`` around ``center_deg`` (default: the primary direction).
 
     With ``base`` (the nominal result) and ``eps`` / ``probe_cap``, the design must
     obey the same admissibility rules as the diverse sets: primary compliance
     <= (1 + eps) x nominal and every probe compliance <= (1 + probe_cap) x nominal.
     """
     settings = settings or Settings()
-    S = direction_second_moment(primary_angle(problem), np.deg2rad(half_range_deg))
+    center = primary_angle(problem) if center_deg is None else np.deg2rad(center_deg)
+    S = direction_second_moment(center, np.deg2rad(half_range_deg))
     blocks = {"robust": direction_basis(problem)}
     constraints = []
     if base is not None and eps is not None:
@@ -51,6 +52,24 @@ def robust(problem: Problem, settings: Settings | None = None, half_range_deg: f
         blocks["probes"] = probe_loads(problem)
     return optimize(problem, ExpectedCompliance("robust", S), constraints, blocks=blocks,
                     settings=settings, label=label)
+
+
+def robust_set(problem: Problem, base: Result, n_designs: int = 4, settings: Settings | None = None,
+               eps: float | None = None, probe_cap: float | None = None) -> list[Result]:
+    """Set-vs-set baseline: the nominal design plus ``n_designs - 1`` designs, each
+    robust over one sector of load directions, under the same rules as the diverse sets.
+
+    Compliance is quadratic in the load, so d and -d are equivalent and the sectors
+    only need to tile a half circle, starting at the primary direction.
+    """
+    designs = [base]
+    m = n_designs - 1
+    half = 90.0 / m
+    theta0 = np.rad2deg(primary_angle(problem))
+    for k in range(m):
+        designs.append(robust(problem, settings, half, base=base, eps=eps, probe_cap=probe_cap,
+                              label=f"robust_set-{k + 1}", center_deg=theta0 + 180.0 * k / m))
+    return designs
 
 
 def descriptor_for(problem: Problem, kind: str, behavior_mode: str = "logcorr"):

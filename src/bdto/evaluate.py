@@ -21,10 +21,25 @@ def compliances(problem: Problem, xphys_list, loads: np.ndarray, penal: float = 
     return np.array([np.sum(loads * fe.displacements(xp, loads), axis=0) for xp in xphys_list])
 
 
+def geomean_ci(ratios: np.ndarray, n_boot: int = 2000, seed: int = 0) -> tuple[float, float]:
+    """95% bootstrap interval (over held-out loads) of the geometric-mean ratio."""
+    logs = np.log(ratios)
+    idx = np.random.default_rng(seed).integers(0, len(logs), (n_boot, len(logs)))
+    lo, hi = np.quantile(np.exp(logs[idx].mean(axis=1)), [0.025, 0.975])
+    return float(lo), float(hi)
+
+
+def prefix_geomeans(C: np.ndarray, c_ref: np.ndarray) -> list[float]:
+    """Geomean ratio of the first k designs of a set, k = 1..n (sets are grown in order)."""
+    best = np.minimum.accumulate(C, axis=0)
+    return np.exp(np.log(best / c_ref).mean(axis=1)).tolist()
+
+
 def summarize(ratios: np.ndarray) -> dict:
     logs = np.log(ratios)
     return {
         "geomean": float(np.exp(logs.mean())),
+        "geomean_ci95": geomean_ci(ratios),
         "median": float(np.median(ratios)),
         "p90": float(np.quantile(ratios, 0.9)),
         "max": float(ratios.max()),
@@ -47,7 +62,7 @@ def evaluate_sets(problem: Problem, sets: dict[str, list[np.ndarray]], loads: np
     c_ref = C[reference][0]
     c_primary = {name: compliances(problem, xps, problem.primary_load[:, None], penal)[:, 0]
                  for name, xps in sets.items()}
-    out = {"methods": {}, "ratios": {}}
+    out = {"methods": {}, "ratios": {}, "C": C, "c_ref": c_ref}
     for name, Cs in C.items():
         ratios = Cs.min(axis=0) / c_ref
         out["ratios"][name] = ratios
@@ -56,6 +71,7 @@ def evaluate_sets(problem: Problem, sets: dict[str, list[np.ndarray]], loads: np
             "primary_gap": (c_primary[name] / c_primary[reference][0] - 1).tolist(),
             "all": summarize(ratios),
             **{fam: summarize(ratios[families == fam]) for fam in np.unique(families)},
+            "prefix_geomean": prefix_geomeans(Cs, c_ref),
             "behavior_spread": pairwise_distance(problem, sets[name], "behavior", penal),
             "shape_spread": pairwise_distance(problem, sets[name], "shape", penal),
         }

@@ -14,8 +14,9 @@ from .problems import Problem  # noqa: E402
 # the nominal reference is neutral gray).
 COLORS = {"behavior": "#2a78d6", "shape": "#eb6834", "robust": "#1baf7a", "nominal": "#8a8985"}
 # Robust variants share the robust hue and are told apart by line style (and the legend).
-COLORS.update({"robust_budget": COLORS["robust"], "robust_narrow": COLORS["robust"]})
-LINESTYLES = {"robust_budget": "--", "robust_narrow": ":"}
+COLORS.update({"robust_budget": COLORS["robust"], "robust_narrow": COLORS["robust"],
+               "robust_set": COLORS["robust"]})
+LINESTYLES = {"robust_budget": "--", "robust_narrow": ":", "robust_set": "-."}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 plt.rcParams.update({

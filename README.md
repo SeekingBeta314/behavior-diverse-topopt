@@ -9,10 +9,12 @@ geometry, and test whether such sets cope better with loads the optimizer never 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                                            # 27 tests, ~1 s (incl. finite-difference gradient checks)
+pytest                                            # 28 tests, ~1 s (incl. finite-difference gradient checks)
 python -m bdto.experiment --quick                 # 20x40 smoke run, ~5 s
 python -m bdto.experiment --problem cantilever    # 80x40, ~40 s
-python -m bdto.experiment --problem l_bracket     # 80x80, ~2 min
+python -m bdto.experiment --problem l_bracket     # 80x80, ~3 min
+python -m bdto.sweep                              # ε ∈ {5,10,20}% × both problems, 6-design sets, ~10 min
+python scripts/slide_figures.py                   # presentation figures -> results/slides/
 ```
 
 Each run writes `results/<problem>_<nelx>x<nely>/`: `designs.png` (gallery),
@@ -30,9 +32,9 @@ Each run writes `results/<problem>_<nelx>x<nely>/`: `designs.png` (gallery),
 | Probe / robust / held-out loads | `loads.py` | Probes = patch {Fx, Fy, moment}. |
 | Objectives and constraints | `objectives.py` | Compliance, expected compliance, near-optimality and probe-cap bounds, behavior and shape descriptors, repulsion kernels. |
 | Optimization loop | `optimize.py` | `Pipeline` (x → x̃ → x̄ → K⁻¹L) and `optimize()` |
-| The strategies | `designs.py` | nominal, robust [7] (3 variants), shape-diverse [2], behavior-diverse |
-| Evaluation | `evaluate.py` | best-in-set compliance on held-out loads |
-| CLI + figures | `experiment.py`, `plotting.py` | |
+| The strategies | `designs.py` | nominal, robust [7] (3 single-design variants + a set), shape-diverse [2], behavior-diverse |
+| Evaluation | `evaluate.py` | best-in-set compliance on held-out loads, bootstrap CIs, set-size prefixes |
+| CLI + figures | `experiment.py`, `sweep.py`, `plotting.py`, `scripts/slide_figures.py` | |
 
 ### Formulation
 
@@ -54,8 +56,10 @@ and the same factorization (the proposal's "reuse the existing stiffness matrix"
   so the comparison is fair. The proposal's penalty form
   (`min c/c* + α Σ φ`) is `--mode penalty`.
   The reference `c_nominal` is taken per β-stage, so the budget stays meaningful during continuation.
-- **Probe caps** (default on): every probe compliance must stay at or below
-  `(1 + cap) × nominal`. See finding 1 for why.
+- **Probe caps** (default on, cap = ε): every probe compliance must stay at or below
+  `(1 + cap) × nominal`. See finding 1 for why. The vertical probe is parallel to the
+  primary load, so a cap below ε would silently override the budget (an early sweep
+  had exactly this bug at ε = 20%).
 - **Robust baselines**: minimize expected compliance with the load direction uniform
   over ±θ around the primary direction (closed form via `tr(S F)`). Three variants:
   - `robust`: θ = 180° (`--robust-range`), unconstrained. It is **told** the direction
@@ -65,68 +69,72 @@ and the same factorization (the proposal's "reuse the existing stiffness matrix"
   - `robust_narrow`: same rules, but told a too-narrow distribution
     (θ = 30°, `--robust-narrow-range`). It models a designer who guesses the
     uncertainty wrong.
+  - `robust_set`: the set-vs-set baseline. The nominal design plus K−1 budget-matched
+    designs, each robust over one sector of the true direction range. It gets the same
+    "pick the best member" advantage as the diverse sets *and* knows the loads.
 - **Held-out loads** (never used in optimization): half are unit forces at a random
   angle with a random offset along the free edge (force + couple); half are point
   forces on a single random patch node (local loads the rigid-body probes cannot
   represent). A set's score is `min_k c_k(f) / c_nominal(f)`.
 
-## Results so far (4-design sets, ε = 10%, probe cap 10%, σ = 0.3, 200 held-out loads)
+## Results (6-design sets, cap = ε, σ = 0.3, 200 held-out loads)
 
-Geomean of best-in-set compliance / nominal compliance on held-out loads (lower is better).
-"Wins" = the fraction of held-out loads where the behavior set is strictly better than that method.
+Geomean of best-in-set compliance / nominal compliance on the held-out loads (lower is
+better; 95% bootstrap CIs in `results/sweep/*/metrics.json`). From `python -m bdto.sweep`:
 
-| | cantilever 80×40 | wins | L-bracket 80×80 | wins | primary cost (cant. / L) |
-|---|---|---|---|---|---|
-| nominal | 1.00 | 71% | 1.00 | 86% | 0 |
-| robust (unconstrained, told the distribution) | 0.92 | 79% | **0.49** | 18% | +1% / +12.5% |
-| robust_budget (same rules as the sets) | 0.93 | 84% | **0.57** | 16% | +1% / +9.6% |
-| robust_narrow (same rules, distribution too narrow) | 0.98 | 68% | 0.73 | 86% | 0% / +3% |
-| shape-diverse set | 0.93 | 64% | 1.00 | 86% | +10% |
-| **behavior-diverse set** | **0.87** | — | 0.61 | — | +10% |
+| problem | ε | behavior | shape | robust_set | robust_budget | robust_narrow | robust (unconstr.) |
+|---|---|---|---|---|---|---|---|
+| cantilever | 5% | 0.88 | 0.93 | **0.85** | 0.93 | 0.98 | 0.92 |
+| cantilever | 10% | 0.86 | 0.93 | **0.83** | 0.93 | 0.98 | 0.92 |
+| cantilever | 20% | 0.86 | 0.96 | **0.80** | 0.93 | 0.97 | 0.92 |
+| L-bracket | 5% | 0.68 | 1.00 | 0.65 | 0.67 | 0.73 | **0.49** |
+| L-bracket | 10% | 0.61 | 1.00 | 0.55 | 0.57 | 0.73 | **0.49** |
+| L-bracket | 20% | 0.52 | 0.88 | **0.49** | 0.54 | 0.73 | **0.49** |
 
-Ablations (behavior set, geomean): without probe caps 1.00 / 0.81; with a 25% cap 0.88 / 0.71.
+At ε = 10% the behavior set is strictly better than the shape set on 68% / 86% of held-out
+loads (cantilever / L-bracket), and better than the budget-matched single robust design on
+91% / 17%. `--behavior-mode logdiag` (no correlation terms) was no better (0.87 / 0.61 at
+ε = 10%). Ablation: without probe caps the behavior set scores 1.00 / 0.81 (4-design sets).
 
-Caveat: a set always contains the nominal design, so its ratio is never above 1. A single
-robust design can be worse than nominal on some loads (L-bracket `robust_budget`: p90 1.04,
-max 1.10). Part of a set's advantage is that it gets to choose among its designs; it is not
-a single-design-vs-single-design comparison.
+Figures: `results/sweep/set_size.png` (score vs set size) and `results/sweep/eps.png`
+(score vs ε with CIs).
 
 **Finding 1: diversity by degradation, and its fix.** Without caps, the unsigned
 descriptor distance rewards *any* change in response. The cheapest change is to become
 much softer in a probe direction the primary load doesn't need. The uncapped cantilever
-designs thinned the connection to the load patch: `F_xx` rose 15–17× and the rotational
-compliance up to 44×. They were "different" but worse at everything, so the set never
-beat the nominal design. **Probe caps** (`--probe-cap`, default 0.10) constrain every
-probe compliance to ≤ (1 + cap) × nominal. A new design can then differ only by being
-*stiffer* in some direction or by coupling force and moment differently. The designs now
-show genuinely different load paths, and a tighter cap gives a better set. Caps are
-applied to the shape set and `robust_budget`/`robust_narrow` too, so all three face the
-same rules.
+designs thinned the connection to the load patch: `F_xx` rose up to 17× and the rotational
+compliance up to 44×. They were "different" but worse at everything, so the set never beat
+the nominal design. **Probe caps** constrain every probe compliance to ≤ (1 + ε) × nominal,
+so a new design can only differ by being *stiffer* somewhere or by coupling force and
+moment differently. Caps apply to every method's set members and budget-matched designs.
 
 **Finding 2: shape diversity ≠ behavior diversity.** Shape-diverse designs differ a lot in
-layout (shape spread 0.55) but little in response (behavior spread 0.05–0.15), and they
-barely help on held-out loads. That supports the proposal's premise.
+layout (shape spread ≈ 0.55) but little in response (behavior spread 0.05–0.15), and they
+barely help on held-out loads (0.93 / 1.00 at ε = 10%). That supports the proposal's premise.
 
-**Finding 3: against robust optimization, it depends on what robust is told.**
-- On the cantilever, the behavior set beats every robust variant, even the one told the
-  true direction distribution.
-- On the L-bracket, a robust design told the right distribution still wins, even at a
-  matched budget (0.57 vs 0.61). Given a wrong (too narrow) distribution it loses
-  clearly (0.73; the behavior set wins 86% of loads).
+**Finding 3: behavior diversity helps without knowing the loads, but knowing them still
+wins.** The behavior set beats the shape set and the robust design given the wrong
+(too narrow) range on both problems. On the cantilever it also beats every single robust
+design; on the L-bracket, single robust designs told the true range are ahead (0.49
+unconstrained, 0.57 budget-matched, vs 0.61). A budget-matched **set** of robust designs that is
+told the true direction range is 0.02–0.06 better at every ε (CIs overlap at some ε).
+So the proposal's success criterion is half met: better than shape diversity, and
+competitive with (but not ahead of) robust optimization, without knowing the loads in advance.
 
-So the honest claim is "competitive without knowing the loads, and better when the
-assumed distribution is wrong", which matches the proposal's success criterion.
+**Finding 4: behavior sets saturate after about two designs.** Most of the gain comes from
+the second design. In the L-bracket, behavior design 1 (2.7× stiffer horizontally) is the
+best member for 169 of 200 loads, and later designs sit at the caps, differing mostly
+through correlation changes. The robust set keeps improving up to 5–6 designs.
 
-## Next steps / open questions for the check-in
+## Limitations and future work
 
-1. Sweep ε ∈ {5, 10, 20}%, the cap, and set sizes 2–6; multiple held-out seeds
-   (error bars).
-2. A set-vs-set robust baseline: K robust designs (e.g. one per direction sector), so
-   the "pick the best design" advantage is matched.
-3. Alternatives to caps: a one-sided "be stiffer somewhere" distance, or diversity
-   in *which members carry load* (strain-energy distribution under the probes).
-4. Optional oracle normalization (optimize separately for each held-out load).
-5. More probe sets (several interfaces), loads away from the patch.
+- Only one load interface (3 probes); held-out loads all act on it. Several interfaces,
+  and loads away from the patch, would test the idea more broadly.
+- A one-sided ("stiffer somewhere") or load-path (strain-energy) diversity measure might
+  avoid both the degradation loophole and the early saturation without hand-set caps.
+- 2D, linear, compliance only; one mesh resolution per benchmark; one held-out seed
+  (CIs are bootstrap over loads, not over seeds).
+- Oracle normalization (optimize separately for each held-out load) is not implemented.
 
 ## References
 

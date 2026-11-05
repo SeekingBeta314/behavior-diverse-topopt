@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from . import plotting
-from .designs import diverse_set, nominal, robust
+from .designs import diverse_set, nominal, robust, robust_set
 from .evaluate import evaluate_sets
 from .loads import heldout_loads
 from .optimize import Settings
@@ -35,8 +35,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--sigma-behavior", type=float, default=None)
     p.add_argument("--sigma-shape", type=float, default=None)
     p.add_argument("--behavior-mode", default="logcorr", choices=["logcorr", "logdiag"])
-    p.add_argument("--probe-cap", type=float, default=0.10,
-                   help="cap each probe compliance at (1 + cap) x nominal, both sets; negative disables")
+    p.add_argument("--probe-cap", type=float, default=None,
+                   help="cap each probe compliance at (1 + cap) x nominal for every set member and the "
+                        "budget-matched robust designs; default = eps (no probe may degrade more than the "
+                        "primary load is allowed to); negative disables")
     p.add_argument("--robust-range", type=float, default=180.0, help="robust design: load-angle half range (deg)")
     p.add_argument("--robust-narrow-range", type=float, default=30.0,
                    help="robust_narrow: half range (deg) of a too-narrow, mis-specified distribution")
@@ -71,7 +73,9 @@ def run(args: argparse.Namespace) -> dict:
 
     base = nominal(problem, settings)
     tick("nominal")
-    probe_cap = args.probe_cap if args.probe_cap >= 0 else None
+    # Default cap = eps. One probe is parallel to the primary load, so a cap below eps
+    # would silently override the compliance budget.
+    probe_cap = args.eps if args.probe_cap is None else (args.probe_cap if args.probe_cap >= 0 else None)
     # robust: told the full direction distribution, unconstrained (strongest, least fair).
     # robust_budget: same distribution, same admissibility rules as the sets.
     # robust_narrow: same rules, but the distribution it is told is too narrow.
@@ -80,7 +84,8 @@ def run(args: argparse.Namespace) -> dict:
                         probe_cap=probe_cap, label="robust_budget")
     rob_narrow = robust(problem, settings, args.robust_narrow_range, base=base, eps=args.eps,
                         probe_cap=probe_cap, label="robust_narrow")
-    tick("robust x3")
+    rob_set = robust_set(problem, base, args.n_designs, settings, eps=args.eps, probe_cap=probe_cap)
+    tick("robust x3 + robust set")
     common = dict(n_designs=args.n_designs, settings=settings, mode=args.mode, eps=args.eps,
                   alpha=args.alpha, kernel=args.kernel, probe_cap=probe_cap)
     shape = diverse_set(problem, base, "shape", sigma=args.sigma_shape, **common)
@@ -90,7 +95,7 @@ def run(args: argparse.Namespace) -> dict:
     tick("behavior set")
 
     results = {"nominal": [base], "robust": [rob], "robust_budget": [rob_budget],
-               "robust_narrow": [rob_narrow], "shape": shape, "behavior": behavior}
+               "robust_narrow": [rob_narrow], "robust_set": rob_set, "shape": shape, "behavior": behavior}
     sets = {name: [r.xphys for r in rs] for name, rs in results.items()}
     loads, families = heldout_loads(problem, args.n_test, args.seed)
     metrics = evaluate_sets(problem, sets, loads, families, penal=settings.penal)
