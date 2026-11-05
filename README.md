@@ -9,7 +9,7 @@ geometry, and test whether such sets cope better with loads the optimizer never 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                                            # 26 tests, ~1 s (incl. finite-difference gradient checks)
+pytest                                            # 27 tests, ~1 s (incl. finite-difference gradient checks)
 python -m bdto.experiment --quick                 # 20x40 smoke run, ~5 s
 python -m bdto.experiment --problem cantilever    # 80x40, ~40 s
 python -m bdto.experiment --problem l_bracket     # 80x80, ~2 min
@@ -30,7 +30,7 @@ Each run writes `results/<problem>_<nelx>x<nely>/`: `designs.png` (gallery),
 | Probe / robust / held-out loads | `loads.py` | Probes = patch {Fx, Fy, moment}. |
 | Objectives and constraints | `objectives.py` | Compliance, expected compliance, near-optimality and probe-cap bounds, behavior and shape descriptors, repulsion kernels. |
 | Optimization loop | `optimize.py` | `Pipeline` (x → x̃ → x̄ → K⁻¹L) and `optimize()` |
-| The four strategies | `designs.py` | nominal, robust [7], shape-diverse [2], behavior-diverse |
+| The strategies | `designs.py` | nominal, robust [7] (3 variants), shape-diverse [2], behavior-diverse |
 | Evaluation | `evaluate.py` | best-in-set compliance on held-out loads |
 | CLI + figures | `experiment.py`, `plotting.py` | |
 
@@ -56,30 +56,40 @@ and the same factorization (the proposal's "reuse the existing stiffness matrix"
   The reference `c_nominal` is taken per β-stage, so the budget stays meaningful during continuation.
 - **Probe caps** (default on): every probe compliance must stay at or below
   `(1 + cap) × nominal`. See finding 1 for why.
-- **Robust baseline**: minimize expected compliance with the load direction uniform
-  over ±`--robust-range`° around the primary direction (closed form via `tr(S F)`).
-  This baseline **is told** the load distribution; the diverse sets are not.
+- **Robust baselines**: minimize expected compliance with the load direction uniform
+  over ±θ around the primary direction (closed form via `tr(S F)`). Three variants:
+  - `robust`: θ = 180° (`--robust-range`), unconstrained. It is **told** the direction
+    distribution and may spend any amount of primary compliance (strongest, least fair).
+  - `robust_budget`: same distribution, but held to the same rules as the sets
+    (primary ≤ (1+ε) × nominal, probe caps).
+  - `robust_narrow`: same rules, but told a too-narrow distribution
+    (θ = 30°, `--robust-narrow-range`). It models a designer who guesses the
+    uncertainty wrong.
 - **Held-out loads** (never used in optimization): half are unit forces at a random
   angle with a random offset along the free edge (force + couple); half are point
   forces on a single random patch node (local loads the rigid-body probes cannot
   represent). A set's score is `min_k c_k(f) / c_nominal(f)`.
 
-## Results so far (4-design sets, ε = 10%, σ = 0.3, 200 held-out loads)
+## Results so far (4-design sets, ε = 10%, probe cap 10%, σ = 0.3, 200 held-out loads)
 
-Geomean of best-in-set compliance / nominal compliance on held-out loads (lower is better):
+Geomean of best-in-set compliance / nominal compliance on held-out loads (lower is better).
+"Wins" = the fraction of held-out loads where the behavior set is strictly better than that method.
 
-| | cantilever 80×40 | L-bracket 80×80 | primary-load cost |
-|---|---|---|---|
-| nominal | 1.00 | 1.00 | 0 |
-| robust (single, *knows* the direction distribution) | 0.92 | **0.49** | +1% / +12.5% |
-| shape-diverse set, probe cap 10% | 0.93 | 1.00 | +10% |
-| behavior-diverse set, **no** probe cap | 1.00 | 0.81 | +10% |
-| behavior-diverse set, probe cap 25% | 0.88 | 0.71 | +10% |
-| **behavior-diverse set, probe cap 10%** (default) | **0.87** | 0.61 | +10% |
+| | cantilever 80×40 | wins | L-bracket 80×80 | wins | primary cost (cant. / L) |
+|---|---|---|---|---|---|
+| nominal | 1.00 | 71% | 1.00 | 86% | 0 |
+| robust (unconstrained, told the distribution) | 0.92 | 79% | **0.49** | 18% | +1% / +12.5% |
+| robust_budget (same rules as the sets) | 0.93 | 84% | **0.57** | 16% | +1% / +9.6% |
+| robust_narrow (same rules, distribution too narrow) | 0.98 | 68% | 0.73 | 86% | 0% / +3% |
+| shape-diverse set | 0.93 | 64% | 1.00 | 86% | +10% |
+| **behavior-diverse set** | **0.87** | — | 0.61 | — | +10% |
 
-With caps at 10%, the behavior set strictly beats the shape set on 64% (cantilever) and
-86% (L-bracket) of held-out loads. It beats the robust design on 79% of cantilever loads
-but only 18% of L-bracket loads.
+Ablations (behavior set, geomean): without probe caps 1.00 / 0.81; with a 25% cap 0.88 / 0.71.
+
+Caveat: a set always contains the nominal design, so its ratio is never above 1. A single
+robust design can be worse than nominal on some loads (L-bracket `robust_budget`: p90 1.04,
+max 1.10). Part of a set's advantage is that it gets to choose among its designs; it is not
+a single-design-vs-single-design comparison.
 
 **Finding 1: diversity by degradation, and its fix.** Without caps, the unsigned
 descriptor distance rewards *any* change in response. The cheapest change is to become
@@ -90,21 +100,29 @@ beat the nominal design. **Probe caps** (`--probe-cap`, default 0.10) constrain 
 probe compliance to ≤ (1 + cap) × nominal. A new design can then differ only by being
 *stiffer* in some direction or by coupling force and moment differently. The designs now
 show genuinely different load paths, and a tighter cap gives a better set. Caps are
-applied to the shape set too, so both sets face the same admissibility rules.
+applied to the shape set and `robust_budget`/`robust_narrow` too, so all three face the
+same rules.
 
 **Finding 2: shape diversity ≠ behavior diversity.** Shape-diverse designs differ a lot in
 layout (shape spread 0.55) but little in response (behavior spread 0.05–0.15), and they
 barely help on held-out loads. That supports the proposal's premise.
 
-**Finding 3: the robust baseline is strong when it knows the distribution.** On the
-L-bracket, the robust design wins most loads, but it pays 12.5% on the primary load and
-is told the direction distribution in advance.
+**Finding 3: against robust optimization, it depends on what robust is told.**
+- On the cantilever, the behavior set beats every robust variant, even the one told the
+  true direction distribution.
+- On the L-bracket, a robust design told the right distribution still wins, even at a
+  matched budget (0.57 vs 0.61). Given a wrong (too narrow) distribution it loses
+  clearly (0.73; the behavior set wins 86% of loads).
+
+So the honest claim is "competitive without knowing the loads, and better when the
+assumed distribution is wrong", which matches the proposal's success criterion.
 
 ## Next steps / open questions for the check-in
 
-1. **Fairer robust comparison:** budget-matched robust design (≤ +10% primary
-   compliance), robust with a mismatched/narrower distribution, and a set of K robust designs.
-2. Sweep ε ∈ {5, 10, 20}%, the cap, and set sizes 2–6; multiple held-out seeds.
+1. Sweep ε ∈ {5, 10, 20}%, the cap, and set sizes 2–6; multiple held-out seeds
+   (error bars).
+2. A set-vs-set robust baseline: K robust designs (e.g. one per direction sector), so
+   the "pick the best design" advantage is matched.
 3. Alternatives to caps: a one-sided "be stiffer somewhere" distance, or diversity
    in *which members carry load* (strain-energy distribution under the probes).
 4. Optional oracle normalization (optimize separately for each held-out load).

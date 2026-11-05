@@ -63,6 +63,19 @@ def test_probe_caps_hold(prob, base):
     assert len(base.stage_xphys) == len(FAST.betas)
 
 
+def test_budget_robust_obeys_set_rules(prob, base):
+    from bdto.loads import probe_loads
+    from bdto.optimize import evaluate_state
+
+    eps, cap = 0.05, 0.10
+    rob = robust(prob, FAST, base=base, eps=eps, probe_cap=cap, label="robust_budget")
+    assert rob.compliance <= (1 + eps) * base.compliance * 1.03
+    blocks = {"probes": probe_loads(prob)}
+    ratio = (np.diag(evaluate_state(prob, rob.xphys, blocks).block("probes"))
+             / np.diag(evaluate_state(prob, base.xphys, blocks).block("probes")))
+    assert np.all(ratio <= (1 + cap) * 1.03), ratio
+
+
 def test_evaluation_pipeline(prob, base):
     rob = robust(prob, FAST)
     loads, fam = heldout_loads(prob, 10)

@@ -38,6 +38,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--probe-cap", type=float, default=0.10,
                    help="cap each probe compliance at (1 + cap) x nominal, both sets; negative disables")
     p.add_argument("--robust-range", type=float, default=180.0, help="robust design: load-angle half range (deg)")
+    p.add_argument("--robust-narrow-range", type=float, default=30.0,
+                   help="robust_narrow: half range (deg) of a too-narrow, mis-specified distribution")
     p.add_argument("--n-test", type=int, default=200)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--rmin", type=float, default=2.0)
@@ -69,18 +71,26 @@ def run(args: argparse.Namespace) -> dict:
 
     base = nominal(problem, settings)
     tick("nominal")
+    probe_cap = args.probe_cap if args.probe_cap >= 0 else None
+    # robust: told the full direction distribution, unconstrained (strongest, least fair).
+    # robust_budget: same distribution, same admissibility rules as the sets.
+    # robust_narrow: same rules, but the distribution it is told is too narrow.
     rob = robust(problem, settings, args.robust_range)
-    tick("robust")
+    rob_budget = robust(problem, settings, args.robust_range, base=base, eps=args.eps,
+                        probe_cap=probe_cap, label="robust_budget")
+    rob_narrow = robust(problem, settings, args.robust_narrow_range, base=base, eps=args.eps,
+                        probe_cap=probe_cap, label="robust_narrow")
+    tick("robust x3")
     common = dict(n_designs=args.n_designs, settings=settings, mode=args.mode, eps=args.eps,
-                  alpha=args.alpha, kernel=args.kernel,
-                  probe_cap=args.probe_cap if args.probe_cap >= 0 else None)
+                  alpha=args.alpha, kernel=args.kernel, probe_cap=probe_cap)
     shape = diverse_set(problem, base, "shape", sigma=args.sigma_shape, **common)
     tick("shape set")
     behavior = diverse_set(problem, base, "behavior", sigma=args.sigma_behavior,
                            behavior_mode=args.behavior_mode, **common)
     tick("behavior set")
 
-    results = {"nominal": [base], "robust": [rob], "shape": shape, "behavior": behavior}
+    results = {"nominal": [base], "robust": [rob], "robust_budget": [rob_budget],
+               "robust_narrow": [rob_narrow], "shape": shape, "behavior": behavior}
     sets = {name: [r.xphys for r in rs] for name, rs in results.items()}
     loads, families = heldout_loads(problem, args.n_test, args.seed)
     metrics = evaluate_sets(problem, sets, loads, families, penal=settings.penal)
@@ -109,11 +119,11 @@ def run(args: argparse.Namespace) -> dict:
 
 def print_summary(report: dict) -> None:
     print("\nheld-out loads: best-in-set compliance / nominal (lower is better)")
-    print(f"{'method':<10}{'n':>3}{'geomean':>9}{'median':>8}{'p90':>8}{'max':>8}"
+    print(f"{'method':<15}{'n':>3}{'geomean':>9}{'median':>8}{'p90':>8}{'max':>8}"
           f"{'max gap':>9}{'beh. spread':>12}{'shape spread':>13}")
     for name, m in report["methods"].items():
         a = m["all"]
-        print(f"{name:<10}{m['n_designs']:>3}{a['geomean']:>9.3f}{a['median']:>8.3f}{a['p90']:>8.3f}"
+        print(f"{name:<15}{m['n_designs']:>3}{a['geomean']:>9.3f}{a['median']:>8.3f}{a['p90']:>8.3f}"
               f"{a['max']:>8.3f}{100 * max(m['primary_gap']):>8.1f}%{m['behavior_spread']:>12.3f}"
               f"{m['shape_spread']:>13.3f}")
     if report.get("behavior_win_rate"):

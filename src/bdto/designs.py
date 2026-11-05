@@ -1,8 +1,9 @@
-"""The four design strategies compared in the study.
+"""The design strategies compared in the study.
 
 - ``nominal``:  single compliance-optimal design for the primary load.
 - ``robust``:   single design minimizing expected compliance over a load-direction
                 distribution (Gresia et al. 2024 style); it is *given* that distribution.
+                Optionally held to the same compliance budget and probe caps as the sets.
 - ``diverse_set(kind="shape")``:    near-optimal set, diverse in material layout.
 - ``diverse_set(kind="behavior")``: near-optimal set, diverse in probe-load response.
 
@@ -29,10 +30,27 @@ def nominal(problem: Problem, settings: Settings | None = None) -> Result:
     return optimize(problem, Compliance(), settings=settings, label="nominal")
 
 
-def robust(problem: Problem, settings: Settings | None = None, half_range_deg: float = 180.0) -> Result:
+def robust(problem: Problem, settings: Settings | None = None, half_range_deg: float = 180.0,
+           base: Result | None = None, eps: float | None = None, probe_cap: float | None = None,
+           label: str = "robust") -> Result:
+    """Minimize expected compliance with the load direction uniform over
+    +-``half_range_deg`` around the primary direction.
+
+    With ``base`` (the nominal result) and ``eps`` / ``probe_cap``, the design must
+    obey the same admissibility rules as the diverse sets: primary compliance
+    <= (1 + eps) x nominal and every probe compliance <= (1 + probe_cap) x nominal.
+    """
+    settings = settings or Settings()
     S = direction_second_moment(primary_angle(problem), np.deg2rad(half_range_deg))
-    return optimize(problem, ExpectedCompliance("robust", S), blocks={"robust": direction_basis(problem)},
-                    settings=settings, label="robust")
+    blocks = {"robust": direction_basis(problem)}
+    constraints = []
+    if base is not None and eps is not None:
+        constraints.append(ComplianceBound(base.stage_compliance, eps))
+    if base is not None and probe_cap is not None:
+        constraints += probe_caps(problem, base, probe_cap, settings.penal)
+        blocks["probes"] = probe_loads(problem)
+    return optimize(problem, ExpectedCompliance("robust", S), constraints, blocks=blocks,
+                    settings=settings, label=label)
 
 
 def descriptor_for(problem: Problem, kind: str, behavior_mode: str = "logcorr"):

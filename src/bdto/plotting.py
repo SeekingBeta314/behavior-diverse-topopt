@@ -13,6 +13,9 @@ from .problems import Problem  # noqa: E402
 # Fixed method -> color mapping (categorical slots 1-3 of the reference palette;
 # the nominal reference is neutral gray).
 COLORS = {"behavior": "#2a78d6", "shape": "#eb6834", "robust": "#1baf7a", "nominal": "#8a8985"}
+# Robust variants share the robust hue and are told apart by line style (and the legend).
+COLORS.update({"robust_budget": COLORS["robust"], "robust_narrow": COLORS["robust"]})
+LINESTYLES = {"robust_budget": "--", "robust_narrow": ":"}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 plt.rcParams.update({
@@ -59,7 +62,8 @@ def ratio_ecdf(ratios: dict[str, np.ndarray], path, title: str = "") -> None:
     for name, r in ratios.items():
         xs = np.sort(r)
         ys = np.arange(1, len(xs) + 1) / len(xs)
-        ax.step(xs, ys, where="post", color=COLORS.get(name, INK), linewidth=2, label=name)
+        ax.step(xs, ys, where="post", color=COLORS.get(name, INK), linewidth=2,
+                linestyle=LINESTYLES.get(name, "-"), label=name)
     ax.axvline(1.0, color=MUTED, linewidth=1, linestyle="--")
     ax.set_xscale("log")
     ax.set_xlabel("best-in-set compliance / nominal compliance  (log; left is better)")
