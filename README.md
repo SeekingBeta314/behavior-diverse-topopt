@@ -1,6 +1,6 @@
 # Behavior-Based Diversity in Topology Optimization
 
-6.4420 course project (Josh Nix). Generate near-optimal topology-optimized designs that
+6.4420 course project. Generate near-optimal topology-optimized designs that
 differ in **mechanical behavior** (their response to a few probe loads) rather than in
 geometry, and test whether such sets cope better with loads the optimizer never saw.
 
